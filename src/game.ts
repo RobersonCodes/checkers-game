@@ -6,9 +6,19 @@ import { getBestMove } from "./ai";
 const SAVE_KEY = "checkers-save-v1";
 const SCORE_KEY = "checkers-score-v1";
 
+/**
+ * Half-moves (single plies) allowed without a capture or promotion before the
+ * game is ruled a draw. 40 is the common simplified threshold used when the
+ * official piece-count-dependent endgame rules aren't implemented — it exists
+ * purely to guarantee every game reaches a terminal state.
+ */
+const DRAW_MOVE_LIMIT = 40;
+const REPETITION_LIMIT = 3;
+
 export interface Score {
   red: number;
   black: number;
+  draws: number;
 }
 
 interface SavedGame {
@@ -28,13 +38,67 @@ function posToNotation(row: number, col: number): string {
   return `${colLetter}${rowNumber}`;
 }
 
+function isPlayer(value: unknown): value is Player {
+  return value === "red" || value === "black";
+}
+
+function isDifficulty(value: unknown): value is Difficulty {
+  return value === "easy" || value === "medium" || value === "hard";
+}
+
+function isPiece(value: unknown): value is Piece {
+  if (typeof value !== "object" || value === null) return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.id === "number" &&
+    typeof p.row === "number" &&
+    typeof p.col === "number" &&
+    p.row >= 0 &&
+    p.row < 8 &&
+    p.col >= 0 &&
+    p.col < 8 &&
+    isPlayer(p.color) &&
+    typeof p.isKing === "boolean"
+  );
+}
+
+function isBoard(value: unknown): value is Board {
+  if (!Array.isArray(value) || value.length !== 8) return false;
+  return value.every(row => Array.isArray(row) && row.length === 8 && row.every(cell => cell === null || isPiece(cell)));
+}
+
+/** Validates the shape of data parsed from localStorage before it is trusted as live game state. */
+function isSavedGame(value: unknown): value is SavedGame {
+  if (typeof value !== "object" || value === null) return false;
+  const d = value as Record<string, unknown>;
+  return (
+    isBoard(d.board) &&
+    isPlayer(d.currentPlayer) &&
+    Array.isArray(d.history) &&
+    d.history.every(entry => typeof entry === "string") &&
+    typeof d.redName === "string" &&
+    typeof d.blackName === "string" &&
+    typeof d.vsAI === "boolean" &&
+    isDifficulty(d.difficulty) &&
+    isPlayer(d.aiColor)
+  );
+}
+
+function isScore(value: unknown): value is Omit<Score, "draws"> & { draws?: number } {
+  if (typeof value !== "object" || value === null) return false;
+  const s = value as Record<string, unknown>;
+  return typeof s.red === "number" && typeof s.black === "number" && (s.draws === undefined || typeof s.draws === "number");
+}
+
 function loadScore(): Score {
   try {
     const raw = localStorage.getItem(SCORE_KEY);
-    if (!raw) return { red: 0, black: 0 };
-    return JSON.parse(raw) as Score;
+    if (!raw) return { red: 0, black: 0, draws: 0 };
+    const data: unknown = JSON.parse(raw);
+    if (!isScore(data)) return { red: 0, black: 0, draws: 0 };
+    return { red: data.red, black: data.black, draws: data.draws ?? 0 };
   } catch {
-    return { red: 0, black: 0 };
+    return { red: 0, black: 0, draws: 0 };
   }
 }
 
@@ -53,9 +117,24 @@ export class Game {
   score: Score = loadScore();
   gameOver = false;
   winner: Player | null = null;
+  isDraw = false;
 
   private pendingMoveEvent: { captured: number; promotes: boolean } | null = null;
   private legalMovesCache: Move[] | null = null;
+  /** Half-moves since the last capture or promotion; a draw-by-no-progress trigger. */
+  private movesSinceProgress = 0;
+  /** Occurrence count per (board, player-to-move) key, for threefold-repetition draws. */
+  private positionCounts = new Map<string, number>();
+
+  private positionKey(playerToMove: Player): string {
+    let key = "";
+    for (const row of this.board) {
+      for (const cell of row) {
+        key += cell ? `${cell.color[0]}${cell.isKing ? "K" : "m"}` : ".";
+      }
+    }
+    return `${key}|${playerToMove}`;
+  }
 
   /** Drains the sound/haptics-worthy event produced by the last executed move, if any. */
   consumeMoveEvent(): { captured: number; promotes: boolean } | null {
@@ -147,6 +226,29 @@ export class Game {
       return;
     }
 
+    const isProgress = move.captured.length > 0 || move.promotes;
+    if (isProgress) {
+      this.movesSinceProgress = 0;
+      this.positionCounts.clear();
+    } else {
+      this.movesSinceProgress++;
+    }
+
+    const key = this.positionKey(next);
+    const occurrences = (this.positionCounts.get(key) ?? 0) + 1;
+    this.positionCounts.set(key, occurrences);
+
+    if (occurrences >= REPETITION_LIMIT || this.movesSinceProgress >= DRAW_MOVE_LIMIT) {
+      this.gameOver = true;
+      this.isDraw = true;
+      this.winner = null;
+      this.score.draws += 1;
+      this.persistScore();
+      const reason = occurrences >= REPETITION_LIMIT ? "repetição de posição" : "40 lances sem captura ou promoção";
+      this.history.push(`Fim de jogo — empate (${reason})`);
+      return;
+    }
+
     this.currentPlayer = next;
   }
 
@@ -167,6 +269,9 @@ export class Game {
     this.history = [];
     this.gameOver = false;
     this.winner = null;
+    this.isDraw = false;
+    this.movesSinceProgress = 0;
+    this.positionCounts = new Map();
     this.invalidateCache();
   }
 
@@ -219,7 +324,9 @@ export class Game {
     if (!raw) return false;
 
     try {
-      const data = JSON.parse(raw) as SavedGame;
+      const data: unknown = JSON.parse(raw);
+      if (!isSavedGame(data)) return false;
+
       this.board = data.board;
       this.currentPlayer = data.currentPlayer;
       this.history = data.history;
@@ -233,6 +340,11 @@ export class Game {
       this.lastMove = null;
       this.gameOver = false;
       this.winner = null;
+      this.isDraw = false;
+      // The no-progress/repetition counters aren't part of the saved payload,
+      // so they restart from this loaded position rather than the original game's history.
+      this.movesSinceProgress = 0;
+      this.positionCounts = new Map();
       this.invalidateCache();
       return true;
     } catch {

@@ -75,6 +75,8 @@ function render(): void {
 
   if (game.gameOver && game.winner) {
     statusEl.textContent = `Fim de jogo — vencedor: ${game.playerName(game.winner)}`;
+  } else if (game.gameOver && game.isDraw) {
+    statusEl.textContent = "Fim de jogo — empate";
   } else if (flashMessage) {
     statusEl.textContent = flashMessage;
   } else {
@@ -91,7 +93,8 @@ function render(): void {
     ? `Modo: vs IA (${DIFFICULTY_LABEL[game.difficulty]})`
     : "Modo: 2 jogadores";
 
-  scoreEl.textContent = `Placar: ${game.score.red} x ${game.score.black}`;
+  const drawsSuffix = game.score.draws > 0 ? ` (empates: ${game.score.draws})` : "";
+  scoreEl.textContent = `Placar: ${game.score.red} x ${game.score.black}${drawsSuffix}`;
 
   historyEl.innerHTML = "";
   for (const entry of [...game.history].reverse()) {
@@ -110,8 +113,8 @@ function render(): void {
     interactive: !game.isAiTurn() && !game.gameOver,
   });
 
-  if (game.gameOver && !modalDismissedForThisGame && game.winner) {
-    winnerText.textContent = `Vencedor: ${game.playerName(game.winner)}`;
+  if (game.gameOver && !modalDismissedForThisGame) {
+    winnerText.textContent = game.winner ? `Vencedor: ${game.playerName(game.winner)}` : "Empate";
     winnerModal.classList.remove("hidden");
   } else {
     winnerModal.classList.add("hidden");
