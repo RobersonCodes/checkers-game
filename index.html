@@ -74,6 +74,24 @@
     </div>
   </div>
 
+  <div id="renameModal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Nomes dos jogadores</h2>
+      <form id="renameForm">
+        <label for="redNameInput">Vermelho</label>
+        <input id="redNameInput" type="text" maxlength="20" autocomplete="off" />
+
+        <label for="blackNameInput">Preto</label>
+        <input id="blackNameInput" type="text" maxlength="20" autocomplete="off" />
+
+        <div class="modal-actions">
+          <button type="button" id="cancelRenameBtn">Cancelar</button>
+          <button type="submit">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

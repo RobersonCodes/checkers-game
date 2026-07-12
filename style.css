@@ -58,6 +58,7 @@ body {
   margin: 0;
   font-size: 18px;
   font-weight: bold;
+  overflow-wrap: anywhere;
 }
 
 .red-player {
@@ -299,6 +300,7 @@ button:hover {
 .modal {
   position: fixed;
   inset: 0;
+  z-index: 100;
   background: rgba(0, 0, 0, 0.72);
   display: flex;
   align-items: center;
@@ -325,6 +327,37 @@ button:hover {
 .modal-content p {
   font-size: 18px;
   margin-bottom: 20px;
+}
+
+.modal-content label {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  color: #bdbdbd;
+  margin: 14px 0 6px;
+}
+
+.modal-content input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #101010;
+  color: #fff;
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.modal-content input[type="text"]:focus-visible {
+  outline: 2px solid #ffd21f;
+  outline-offset: 1px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 22px;
 }
 
 .hidden {

@@ -1,9 +1,10 @@
 import type { Board, Difficulty, Move, Piece, Player } from "./types";
 import { applyMove, createInitialBoard } from "./board";
 import { countPieces, getAllValidMoves, getValidMovesForSquare, hasAnyMoves, opponent } from "./rules";
+import type { SaveRepository, SavedGame, Score } from "./persistence";
+import { LocalStorageSaveRepository } from "./persistence";
 
-const SAVE_KEY = "checkers-save-v1";
-const SCORE_KEY = "checkers-score-v1";
+export type { Score } from "./persistence";
 
 /**
  * Half-moves (single plies) allowed without a capture or promotion before the
@@ -14,91 +15,10 @@ const SCORE_KEY = "checkers-score-v1";
 const DRAW_MOVE_LIMIT = 40;
 const REPETITION_LIMIT = 3;
 
-export interface Score {
-  red: number;
-  black: number;
-  draws: number;
-}
-
-interface SavedGame {
-  board: Board;
-  currentPlayer: Player;
-  history: string[];
-  redName: string;
-  blackName: string;
-  vsAI: boolean;
-  difficulty: Difficulty;
-  aiColor: Player;
-}
-
 function posToNotation(row: number, col: number): string {
   const colLetter = "abcdefgh"[col];
   const rowNumber = 8 - row;
   return `${colLetter}${rowNumber}`;
-}
-
-function isPlayer(value: unknown): value is Player {
-  return value === "red" || value === "black";
-}
-
-function isDifficulty(value: unknown): value is Difficulty {
-  return value === "easy" || value === "medium" || value === "hard";
-}
-
-function isPiece(value: unknown): value is Piece {
-  if (typeof value !== "object" || value === null) return false;
-  const p = value as Record<string, unknown>;
-  return (
-    typeof p.id === "number" &&
-    typeof p.row === "number" &&
-    typeof p.col === "number" &&
-    p.row >= 0 &&
-    p.row < 8 &&
-    p.col >= 0 &&
-    p.col < 8 &&
-    isPlayer(p.color) &&
-    typeof p.isKing === "boolean"
-  );
-}
-
-function isBoard(value: unknown): value is Board {
-  if (!Array.isArray(value) || value.length !== 8) return false;
-  return value.every(row => Array.isArray(row) && row.length === 8 && row.every(cell => cell === null || isPiece(cell)));
-}
-
-/** Validates the shape of data parsed from localStorage before it is trusted as live game state. */
-function isSavedGame(value: unknown): value is SavedGame {
-  if (typeof value !== "object" || value === null) return false;
-  const d = value as Record<string, unknown>;
-  return (
-    isBoard(d.board) &&
-    isPlayer(d.currentPlayer) &&
-    Array.isArray(d.history) &&
-    d.history.every(entry => typeof entry === "string") &&
-    typeof d.redName === "string" &&
-    typeof d.blackName === "string" &&
-    typeof d.vsAI === "boolean" &&
-    isDifficulty(d.difficulty) &&
-    isPlayer(d.aiColor)
-  );
-}
-
-function isScore(value: unknown): value is Omit<Score, "draws"> & { draws?: number } {
-  if (typeof value !== "object" || value === null) return false;
-  const s = value as Record<string, unknown>;
-  return typeof s.red === "number" && typeof s.black === "number" && (s.draws === undefined || typeof s.draws === "number");
-}
-
-function loadScore(): Score {
-  try {
-    const raw = localStorage.getItem(SCORE_KEY);
-    if (!raw) return { red: 0, black: 0, draws: 0 };
-    const data: unknown = JSON.parse(raw);
-    if (!isScore(data)) return { red: 0, black: 0, draws: 0 };
-    return { red: data.red, black: data.black, draws: data.draws ?? 0 };
-  } catch {
-    return { red: 0, black: 0, draws: 0 };
-  }
 }
 
 export class Game {
@@ -113,17 +33,23 @@ export class Game {
   vsAI = false;
   aiColor: Player = "black";
   difficulty: Difficulty = "medium";
-  score: Score = loadScore();
+  score: Score;
   gameOver = false;
   winner: Player | null = null;
   isDraw = false;
 
+  private readonly repo: SaveRepository;
   private pendingMoveEvent: { captured: number; promotes: boolean } | null = null;
   private legalMovesCache: Move[] | null = null;
   /** Half-moves since the last capture or promotion; a draw-by-no-progress trigger. */
   private movesSinceProgress = 0;
   /** Occurrence count per (board, player-to-move) key, for threefold-repetition draws. */
   private positionCounts = new Map<string, number>();
+
+  constructor(repo: SaveRepository = new LocalStorageSaveRepository()) {
+    this.repo = repo;
+    this.score = repo.loadScore();
+  }
 
   private positionKey(playerToMove: Player): string {
     let key = "";
@@ -301,7 +227,7 @@ export class Game {
   }
 
   private persistScore(): void {
-    localStorage.setItem(SCORE_KEY, JSON.stringify(this.score));
+    this.repo.saveScore(this.score);
   }
 
   save(): void {
@@ -315,39 +241,32 @@ export class Game {
       difficulty: this.difficulty,
       aiColor: this.aiColor,
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+    this.repo.saveGame(payload);
   }
 
   load(): boolean {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return false;
+    const data = this.repo.loadGame();
+    if (!data) return false;
 
-    try {
-      const data: unknown = JSON.parse(raw);
-      if (!isSavedGame(data)) return false;
-
-      this.board = data.board;
-      this.currentPlayer = data.currentPlayer;
-      this.history = data.history;
-      this.redName = data.redName;
-      this.blackName = data.blackName;
-      this.vsAI = data.vsAI;
-      this.difficulty = data.difficulty;
-      this.aiColor = data.aiColor;
-      this.selectedPiece = null;
-      this.possibleMoves = [];
-      this.lastMove = null;
-      this.gameOver = false;
-      this.winner = null;
-      this.isDraw = false;
-      // The no-progress/repetition counters aren't part of the saved payload,
-      // so they restart from this loaded position rather than the original game's history.
-      this.movesSinceProgress = 0;
-      this.positionCounts = new Map();
-      this.invalidateCache();
-      return true;
-    } catch {
-      return false;
-    }
+    this.board = data.board;
+    this.currentPlayer = data.currentPlayer;
+    this.history = data.history;
+    this.redName = data.redName;
+    this.blackName = data.blackName;
+    this.vsAI = data.vsAI;
+    this.difficulty = data.difficulty;
+    this.aiColor = data.aiColor;
+    this.selectedPiece = null;
+    this.possibleMoves = [];
+    this.lastMove = null;
+    this.gameOver = false;
+    this.winner = null;
+    this.isDraw = false;
+    // The no-progress/repetition counters aren't part of the saved payload,
+    // so they restart from this loaded position rather than the original game's history.
+    this.movesSinceProgress = 0;
+    this.positionCounts = new Map();
+    this.invalidateCache();
+    return true;
   }
 }

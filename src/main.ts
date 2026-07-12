@@ -57,9 +57,34 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 const game = new Game();
-let flashMessage: string | null = null;
 let modalDismissedForThisGame = false;
 let winSoundPlayedForThisGame = false;
+
+// How long a transient status message (e.g. "Captura obrigatória...") stays
+// on screen. Previously the message was cleared inside the very render()
+// call that displayed it, so a second render() triggered in the same tick
+// (or shortly after) could wipe it before the browser ever painted it.
+const FLASH_MESSAGE_DURATION_MS = 2200;
+let flashMessage: string | null = null;
+let flashMessageTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+function showFlashMessage(text: string): void {
+  flashMessage = text;
+  if (flashMessageTimer !== null) window.clearTimeout(flashMessageTimer);
+  flashMessageTimer = window.setTimeout(() => {
+    flashMessage = null;
+    flashMessageTimer = null;
+    render();
+  }, FLASH_MESSAGE_DURATION_MS);
+}
+
+function clearFlashMessage(): void {
+  if (flashMessageTimer !== null) {
+    window.clearTimeout(flashMessageTimer);
+    flashMessageTimer = null;
+  }
+  flashMessage = null;
+}
 
 const startScreen = el<HTMLDivElement>("startScreen");
 const redNameEl = el<HTMLParagraphElement>("redName");
@@ -72,6 +97,10 @@ const historyEl = el<HTMLUListElement>("history");
 const winnerModal = el<HTMLDivElement>("winnerModal");
 const winnerText = el<HTMLParagraphElement>("winnerText");
 const muteBtn = el<HTMLButtonElement>("muteBtn");
+const renameModal = el<HTMLDivElement>("renameModal");
+const renameForm = el<HTMLFormElement>("renameForm");
+const redNameInput = el<HTMLInputElement>("redNameInput");
+const blackNameInput = el<HTMLInputElement>("blackNameInput");
 
 function updateMuteButton(): void {
   muteBtn.textContent = isMuted() ? "🔇 Som" : "🔊 Som";
@@ -112,7 +141,6 @@ function render(): void {
     const thinking = game.isAiTurn() ? " (IA pensando...)" : "";
     statusEl.textContent = `Turno: ${game.playerName(game.currentPlayer)}${thinking}`;
   }
-  flashMessage = null;
 
   const red = countPieces(game.board, "red");
   const black = countPieces(game.board, "black");
@@ -189,7 +217,7 @@ function handleSquareClick(row: number, col: number): void {
   if (game.isAiTurn()) return;
   const result = game.selectSquare(row, col);
   if (result.blockedByMandatoryCapture) {
-    flashMessage = "Captura obrigatória — jogue com a peça que pode capturar.";
+    showFlashMessage("Captura obrigatória — jogue com a peça que pode capturar.");
     playInvalid();
   }
   reactToMoveEvents();
@@ -201,11 +229,22 @@ function hideStartScreen(): void {
   startScreen.classList.add("hidden");
 }
 
+function openRenameModal(): void {
+  redNameInput.value = game.redName;
+  blackNameInput.value = game.blackName;
+  renameModal.classList.remove("hidden");
+  redNameInput.focus();
+}
+
+function closeRenameModal(): void {
+  renameModal.classList.add("hidden");
+}
+
 function startNewGame(): void {
   cancelPendingAiRequest();
   modalDismissedForThisGame = false;
   winSoundPlayedForThisGame = false;
-  flashMessage = null;
+  clearFlashMessage();
   resetBoardView();
   hideStartScreen();
   render();
@@ -226,10 +265,7 @@ el<HTMLButtonElement>("startTwoPlayersBtn").addEventListener("click", () => {
 });
 
 el<HTMLButtonElement>("renameBtn").addEventListener("click", () => {
-  const red = window.prompt("Nome do jogador vermelho:", game.redName);
-  const black = window.prompt("Nome do jogador preto:", game.blackName);
-  game.rename(red ?? game.redName, black ?? game.blackName);
-  render();
+  openRenameModal();
 });
 
 el<HTMLButtonElement>("toggleAIBtn").addEventListener("click", () => {
@@ -251,14 +287,14 @@ el<HTMLButtonElement>("restartBtn").addEventListener("click", () => {
 
 el<HTMLButtonElement>("saveBtn").addEventListener("click", () => {
   game.save();
-  flashMessage = "Partida salva.";
+  showFlashMessage("Partida salva.");
   render();
 });
 
 el<HTMLButtonElement>("loadBtn").addEventListener("click", () => {
   cancelPendingAiRequest();
   const loaded = game.load();
-  flashMessage = loaded ? "Partida carregada." : "Nenhuma partida salva encontrada.";
+  showFlashMessage(loaded ? "Partida carregada." : "Nenhuma partida salva encontrada.");
   modalDismissedForThisGame = !game.gameOver;
   winSoundPlayedForThisGame = game.gameOver;
   resetBoardView();
@@ -271,13 +307,24 @@ el<HTMLButtonElement>("changeDifficultyBtn").addEventListener("click", () => {
   const currentIndex = DIFFICULTY_CYCLE.indexOf(game.difficulty);
   const next = DIFFICULTY_CYCLE[(currentIndex + 1) % DIFFICULTY_CYCLE.length];
   game.setDifficulty(next);
-  flashMessage = `Dificuldade da IA: ${DIFFICULTY_LABEL[next]}`;
+  showFlashMessage(`Dificuldade da IA: ${DIFFICULTY_LABEL[next]}`);
   render();
 });
 
 el<HTMLButtonElement>("closeModalBtn").addEventListener("click", () => {
   modalDismissedForThisGame = true;
   winnerModal.classList.add("hidden");
+});
+
+renameForm.addEventListener("submit", event => {
+  event.preventDefault();
+  game.rename(redNameInput.value, blackNameInput.value);
+  closeRenameModal();
+  render();
+});
+
+el<HTMLButtonElement>("cancelRenameBtn").addEventListener("click", () => {
+  closeRenameModal();
 });
 
 muteBtn.addEventListener("click", () => {
