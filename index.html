@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jogo de Dama com IA</title>
+</head>
+<body>
+  <div id="startScreen" class="start-screen">
+    <div class="start-card">
+      <h1>Jogo de Dama</h1>
+      <p>Escolha a dificuldade da IA</p>
+
+      <div class="difficulty-buttons">
+        <button data-level="1">Fácil</button>
+        <button data-level="2">Médio</button>
+        <button data-level="3">Difícil</button>
+      </div>
+
+      <button id="startTwoPlayersBtn">Jogar 2 jogadores</button>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="container">
+      <header class="header">
+        <h1>Jogo de Dama</h1>
+        <p class="subtitle">TypeScript + IA com Minimax e Poda Alfa-Beta</p>
+      </header>
+
+      <section class="players">
+        <div class="player-card red-player">
+          <h2>Jogador Vermelho</h2>
+          <p id="redName">Vermelho</p>
+        </div>
+
+        <div class="player-card black-player">
+          <h2>Jogador Preto</h2>
+          <p id="blackName">Preto</p>
+        </div>
+      </section>
+
+      <section class="game-info">
+        <p id="status">Turno: Vermelho</p>
+        <p id="counter">Peças — Vermelho: 12 | Preto: 12</p>
+        <p id="modeInfo">Modo: 2 jogadores</p>
+        <p id="score">Placar: 0 x 0</p>
+      </section>
+
+      <div class="actions">
+        <button id="renameBtn">Definir nomes</button>
+        <button id="toggleAIBtn">Ativar IA</button>
+        <button id="restartBtn">Reiniciar partida</button>
+        <button id="saveBtn">Salvar partida</button>
+        <button id="loadBtn">Carregar partida</button>
+        <button id="changeDifficultyBtn">Dificuldade</button>
+        <button id="muteBtn">🔊 Som</button>
+      </div>
+
+      <div id="board" class="board"></div>
+
+      <div class="history-box">
+        <h2>Histórico de jogadas</h2>
+        <ul id="history"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="winnerModal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Fim de jogo</h2>
+      <p id="winnerText">Vencedor: Vermelho</p>
+      <button id="closeModalBtn">Fechar</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
