@@ -140,6 +140,12 @@ button:hover {
   transition: box-shadow 0.15s ease;
 }
 
+.square:focus-visible {
+  outline: 3px solid #7ec8ff;
+  outline-offset: -3px;
+  z-index: 3;
+}
+
 .light {
   background: linear-gradient(160deg, #ecd8b0 0%, #dcbd8c 100%);
 }
@@ -244,6 +250,20 @@ button:hover {
 .highlight-capture {
   box-shadow: inset 0 0 0 4px rgba(220, 20, 60, 0.65);
   animation: pulseHighlightCapture 1.1s ease-in-out infinite;
+}
+
+/* Mandatory-capture squares get a shape cue, not just a different hue, so the
+   distinction still reads for colorblind players (WCAG 1.4.1). */
+.highlight-capture::after {
+  content: "";
+  position: absolute;
+  top: 8%;
+  right: 8%;
+  width: 20%;
+  height: 20%;
+  background: rgba(220, 20, 60, 0.9);
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  pointer-events: none;
 }
 
 .drop-target-active {
@@ -431,5 +451,19 @@ button:hover {
 
   .history-box {
     padding: 14px;
+  }
+}
+
+/* Neutralize every animation/transition (including the infinite highlight
+   pulses) for players who've asked the OS for reduced motion, instead of
+   patching each rule individually. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

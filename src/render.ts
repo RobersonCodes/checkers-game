@@ -29,6 +29,23 @@ let suppressTransitionOnce = false;
 let dragState: DragState | null = null;
 let lastAnimatedMoveKey: string | null = null;
 
+// Roving tabindex: exactly one square is a tab stop at a time; arrow keys
+// move it, Enter/Space activates it. Keeps the whole board keyboard-operable
+// without adding 64 stops to the page's tab order.
+let focusedRow = 0;
+let focusedCol = 1;
+
+function squareNotation(row: number, col: number): string {
+  const colLetter = "abcdefgh"[col];
+  const rowNumber = 8 - row;
+  return `${colLetter}${rowNumber}`;
+}
+
+function pieceDescription(piece: Piece): string {
+  const color = piece.color === "red" ? "vermelha" : "preta";
+  return piece.isKing ? `dama ${color}` : `peça ${color}`;
+}
+
 let latestOptions: RenderOptions = {
   board: [],
   selectedPiece: null,
@@ -65,9 +82,49 @@ function ensureBoardElement(): HTMLElement | null {
   return boardEl;
 }
 
+function moveFocus(row: number, col: number): void {
+  if (row < 0 || row > 7 || col < 0 || col > 7) return;
+  squareEls[focusedRow * 8 + focusedCol].tabIndex = -1;
+  focusedRow = row;
+  focusedCol = col;
+  const next = squareEls[focusedRow * 8 + focusedCol];
+  next.tabIndex = 0;
+  next.focus();
+}
+
+function onSquareKeyDown(event: KeyboardEvent, row: number, col: number): void {
+  switch (event.key) {
+    case "ArrowUp":
+      event.preventDefault();
+      moveFocus(row - 1, col);
+      break;
+    case "ArrowDown":
+      event.preventDefault();
+      moveFocus(row + 1, col);
+      break;
+    case "ArrowLeft":
+      event.preventDefault();
+      moveFocus(row, col - 1);
+      break;
+    case "ArrowRight":
+      event.preventDefault();
+      moveFocus(row, col + 1);
+      break;
+    case "Enter":
+    case " ":
+      event.preventDefault();
+      latestOptions.onSquareClick(row, col);
+      break;
+  }
+}
+
 function buildSquares(container: HTMLElement): void {
   container.innerHTML = "";
   squareEls = [];
+  container.setAttribute("role", "grid");
+  container.setAttribute("aria-label", "Tabuleiro de dama, 8 por 8");
+  container.setAttribute("aria-rowcount", "8");
+  container.setAttribute("aria-colcount", "8");
 
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -75,7 +132,12 @@ function buildSquares(container: HTMLElement): void {
       square.classList.add("square", (row + col) % 2 === 0 ? "light" : "dark");
       square.dataset.row = String(row);
       square.dataset.col = String(col);
+      square.setAttribute("role", "gridcell");
+      square.setAttribute("aria-rowindex", String(row + 1));
+      square.setAttribute("aria-colindex", String(col + 1));
+      square.tabIndex = row === focusedRow && col === focusedCol ? 0 : -1;
       square.addEventListener("click", () => latestOptions.onSquareClick(row, col));
+      square.addEventListener("keydown", event => onSquareKeyDown(event, row, col));
       container.appendChild(square);
       squareEls.push(square);
     }
@@ -94,6 +156,17 @@ function updateSquareHighlights(): void {
         square.classList.add("highlight");
         if (move.captured.length > 0) square.classList.add("highlight-capture");
       }
+
+      const piece = latestOptions.board[row]?.[col];
+      const parts = [squareNotation(row, col)];
+      if (piece) {
+        parts.push(pieceDescription(piece));
+        if (latestOptions.selectedPiece?.id === piece.id) parts.push("selecionada");
+      } else {
+        parts.push("vazia");
+      }
+      if (move) parts.push(move.captured.length > 0 ? "captura disponível" : "lance disponível");
+      square.setAttribute("aria-label", parts.join(", "));
     }
   }
 }
@@ -117,6 +190,9 @@ function createPieceElement(piece: Piece): HTMLDivElement {
   const slot = document.createElement("div");
   slot.classList.add("piece-slot", piece.color);
   slot.dataset.color = piece.color;
+  // The underlying square's aria-label already describes the occupant; hide
+  // this purely-visual layer so screen readers don't announce it twice.
+  slot.setAttribute("aria-hidden", "true");
 
   const disc = document.createElement("div");
   disc.classList.add("piece-disc");

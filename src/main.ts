@@ -240,15 +240,20 @@ function closeRenameModal(): void {
   renameModal.classList.add("hidden");
 }
 
+/** The DOM-refresh tail shared by every full board reset (new game, restart, load). */
+function refreshBoardView(): void {
+  resetBoardView();
+  hideStartScreen();
+  render();
+  requestAiMoveIfNeeded();
+}
+
 function startNewGame(): void {
   cancelPendingAiRequest();
   modalDismissedForThisGame = false;
   winSoundPlayedForThisGame = false;
   clearFlashMessage();
-  resetBoardView();
-  hideStartScreen();
-  render();
-  requestAiMoveIfNeeded();
+  refreshBoardView();
 }
 
 document.querySelectorAll<HTMLButtonElement>(".difficulty-buttons button[data-level]").forEach(button => {
@@ -276,13 +281,8 @@ el<HTMLButtonElement>("toggleAIBtn").addEventListener("click", () => {
 });
 
 el<HTMLButtonElement>("restartBtn").addEventListener("click", () => {
-  cancelPendingAiRequest();
   game.restart();
-  modalDismissedForThisGame = false;
-  winSoundPlayedForThisGame = false;
-  resetBoardView();
-  render();
-  requestAiMoveIfNeeded();
+  startNewGame();
 });
 
 el<HTMLButtonElement>("saveBtn").addEventListener("click", () => {
@@ -297,10 +297,7 @@ el<HTMLButtonElement>("loadBtn").addEventListener("click", () => {
   showFlashMessage(loaded ? "Partida carregada." : "Nenhuma partida salva encontrada.");
   modalDismissedForThisGame = !game.gameOver;
   winSoundPlayedForThisGame = game.gameOver;
-  resetBoardView();
-  hideStartScreen();
-  render();
-  requestAiMoveIfNeeded();
+  refreshBoardView();
 });
 
 el<HTMLButtonElement>("changeDifficultyBtn").addEventListener("click", () => {
