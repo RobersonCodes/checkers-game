@@ -132,6 +132,27 @@ button:hover {
   user-select: none;
 }
 
+/*
+ * Squares are grid items inside .board's content box (i.e. already inset by
+ * padding). Pieces are positioned with absolute left/top percentages, whose
+ * containing block must exactly match that content box, or their 0–100%
+ * coordinate space drifts from where the squares actually render.
+ *
+ * A percentage `inset` here would NOT do that: CSS resolves an element's own
+ * padding-percentage against its *parent's* width (regardless of axis), but
+ * resolves an absolutely-positioned descendant's inset-percentage against
+ * *its own* containing block's width/height — two different reference
+ * boxes for the same declared "3.5%", so copying the value back only gets
+ * close, not exact. Spanning the whole grid instead reuses the grid's own
+ * layout math, which is guaranteed self-consistent with the squares.
+ */
+.board-surface {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  position: relative;
+  pointer-events: none;
+}
+
 .square {
   display: flex;
   align-items: center;
@@ -165,6 +186,7 @@ button:hover {
   z-index: 2;
   transition: left 0.28s cubic-bezier(0.22, 0.9, 0.3, 1), top 0.28s cubic-bezier(0.22, 0.9, 0.3, 1);
   touch-action: none;
+  pointer-events: auto;
 }
 
 .piece-slot.draggable .piece-disc {

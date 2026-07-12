@@ -18,10 +18,15 @@ interface DragState {
   startClientX: number;
   startClientY: number;
   dragging: boolean;
-  boardRect: DOMRect;
+  surfaceRect: DOMRect;
 }
 
 let boardEl: HTMLElement | null = null;
+// Pieces live in this absolutely-positioned layer, inset to match .board's
+// padding exactly (see .board-surface in style.css) — it's the piece
+// coordinate space's true 0–100% box, distinct from #board's own box, which
+// includes the decorative padding around the squares.
+let surfaceEl: HTMLDivElement | null = null;
 let squareEls: HTMLDivElement[] = [];
 let squaresBuilt = false;
 const pieceEls = new Map<number, HTMLDivElement>();
@@ -63,6 +68,7 @@ export function resetBoardView(): void {
   dragState = null;
   lastAnimatedMoveKey = null;
   if (boardEl) boardEl.innerHTML = "";
+  surfaceEl = null;
   suppressTransitionOnce = true;
 }
 
@@ -135,6 +141,12 @@ function buildSquares(container: HTMLElement): void {
       square.setAttribute("role", "gridcell");
       square.setAttribute("aria-rowindex", String(row + 1));
       square.setAttribute("aria-colindex", String(col + 1));
+      // Explicit placement, not grid auto-flow: .board-surface below spans
+      // every row/column as one overlay item, and the auto-placement
+      // algorithm routes auto-flowed items around explicitly-placed ones —
+      // without this, the squares would get shuffled out of the way of it.
+      square.style.gridRow = String(row + 1);
+      square.style.gridColumn = String(col + 1);
       square.tabIndex = row === focusedRow && col === focusedCol ? 0 : -1;
       square.addEventListener("click", () => latestOptions.onSquareClick(row, col));
       square.addEventListener("keydown", event => onSquareKeyDown(event, row, col));
@@ -142,6 +154,11 @@ function buildSquares(container: HTMLElement): void {
       squareEls.push(square);
     }
   }
+
+  const surface = document.createElement("div");
+  surface.className = "board-surface";
+  container.appendChild(surface);
+  surfaceEl = surface;
 
   squaresBuilt = true;
 }
@@ -235,6 +252,7 @@ export function renderBoard(options: RenderOptions): void {
   const container = ensureBoardElement();
   if (!container) return;
   if (!squaresBuilt) buildSquares(container);
+  if (!surfaceEl) return;
 
   updateSquareHighlights();
 
@@ -252,7 +270,7 @@ export function renderBoard(options: RenderOptions): void {
       if (!slot) {
         slot = createPieceElement(piece);
         pieceEls.set(piece.id, slot);
-        container.appendChild(slot);
+        surfaceEl.appendChild(slot);
       }
 
       if (isNew && suppressTransitionOnce) {
@@ -289,7 +307,7 @@ function onPointerDown(event: PointerEvent): void {
   const slot = event.currentTarget as HTMLDivElement;
   const color = slot.dataset.color as Player;
   if (!latestOptions.interactive || color !== latestOptions.currentPlayer) return;
-  if (!boardEl) return;
+  if (!surfaceEl) return;
 
   const row = Number(slot.dataset.row);
   const col = Number(slot.dataset.col);
@@ -305,7 +323,7 @@ function onPointerDown(event: PointerEvent): void {
     startClientX: event.clientX,
     startClientY: event.clientY,
     dragging: false,
-    boardRect: boardEl.getBoundingClientRect(),
+    surfaceRect: surfaceEl.getBoundingClientRect(),
   };
 
   latestOptions.onSquareClick(row, col);
@@ -324,7 +342,7 @@ function onPointerMove(event: PointerEvent): void {
 
   if (!dragState.dragging) return;
 
-  const rect = dragState.boardRect;
+  const rect = dragState.surfaceRect;
   const xPct = clamp(((event.clientX - rect.left) / rect.width) * 100 - 6.25, -3, 90.5);
   const yPct = clamp(((event.clientY - rect.top) / rect.height) * 100 - 6.25, -3, 90.5);
   dragState.el.style.left = `${xPct}%`;
@@ -339,7 +357,7 @@ function onPointerMove(event: PointerEvent): void {
 function onPointerUp(event: PointerEvent): void {
   if (!dragState || event.pointerId !== dragState.pointerId) return;
 
-  const { el, dragging, originRow, originCol, boardRect } = dragState;
+  const { el, dragging, originRow, originCol, surfaceRect } = dragState;
   el.classList.remove("dragging");
   el.releasePointerCapture(event.pointerId);
   setDropHover(null, null);
@@ -347,8 +365,8 @@ function onPointerUp(event: PointerEvent): void {
 
   if (!dragging) return;
 
-  const targetCol = clamp(Math.floor(((event.clientX - boardRect.left) / boardRect.width) * 8), 0, 7);
-  const targetRow = clamp(Math.floor(((event.clientY - boardRect.top) / boardRect.height) * 8), 0, 7);
+  const targetCol = clamp(Math.floor(((event.clientX - surfaceRect.left) / surfaceRect.width) * 8), 0, 7);
+  const targetRow = clamp(Math.floor(((event.clientY - surfaceRect.top) / surfaceRect.height) * 8), 0, 7);
 
   if (targetRow !== originRow || targetCol !== originCol) {
     latestOptions.onSquareClick(targetRow, targetCol);
