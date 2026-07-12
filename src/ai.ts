@@ -1,5 +1,5 @@
 import type { Board, Difficulty, Move, Player } from "./types";
-import { applyMove } from "./board";
+import { makeMoveInPlace, undoMoveInPlace } from "./board";
 import { getAllValidMoves, opponent } from "./rules";
 
 const MAN_VALUE = 100;
@@ -20,6 +20,43 @@ function backRowFor(color: Player): number {
   // A piece's own back row is the opponent's promotion row — occupying it
   // denies the opponent a place to crown a king.
   return color === "red" ? 7 : 0;
+}
+
+const KING_STEPS: [number, number][] = [
+  [-1, -1],
+  [-1, 1],
+  [1, -1],
+  [1, 1],
+];
+
+function forwardRowStep(color: Player): number {
+  return color === "red" ? -1 : 1;
+}
+
+/**
+ * Cheap mobility proxy: counts empty squares immediately reachable by each
+ * piece (kings: all 4 diagonal neighbors; men: their 2 forward neighbors).
+ * evaluateBoard() is called at every leaf of the search tree, so this
+ * deliberately does NOT call getAllValidMoves() here — that would re-run the
+ * full capture-chain generator for both sides at every leaf just to score a
+ * secondary heuristic term, which was the single most expensive avoidable
+ * cost in the AI (see board.ts's makeMoveInPlace for the matching fix on
+ * the allocation side).
+ */
+function countMobility(board: Board, player: Player): number {
+  let mobility = 0;
+  for (const row of board) {
+    for (const piece of row) {
+      if (!piece || piece.color !== player) continue;
+      const steps = piece.isKing ? KING_STEPS : ([[forwardRowStep(piece.color), -1], [forwardRowStep(piece.color), 1]] as const);
+      for (const [dr, dc] of steps) {
+        const r = piece.row + dr;
+        const c = piece.col + dc;
+        if (r >= 0 && r < 8 && c >= 0 && c < 8 && board[r][c] === null) mobility++;
+      }
+    }
+  }
+  return mobility;
 }
 
 function evaluateBoard(board: Board, aiPlayer: Player): number {
@@ -46,7 +83,7 @@ function evaluateBoard(board: Board, aiPlayer: Player): number {
     }
   }
 
-  const mobility = getAllValidMoves(board, aiPlayer).length - getAllValidMoves(board, opponent(aiPlayer)).length;
+  const mobility = countMobility(board, aiPlayer) - countMobility(board, opponent(aiPlayer));
   score += mobility * MOBILITY_WEIGHT;
 
   return score;
@@ -77,8 +114,9 @@ function minimax(
   if (maximizing) {
     let value = -Infinity;
     for (const move of moves) {
-      const child = applyMove(board, move);
-      value = Math.max(value, minimax(child, depth - 1, alpha, beta, next, aiPlayer));
+      const undo = makeMoveInPlace(board, move);
+      value = Math.max(value, minimax(board, depth - 1, alpha, beta, next, aiPlayer));
+      undoMoveInPlace(board, undo);
       alpha = Math.max(alpha, value);
       if (alpha >= beta) break;
     }
@@ -87,8 +125,9 @@ function minimax(
 
   let value = Infinity;
   for (const move of moves) {
-    const child = applyMove(board, move);
-    value = Math.min(value, minimax(child, depth - 1, alpha, beta, next, aiPlayer));
+    const undo = makeMoveInPlace(board, move);
+    value = Math.min(value, minimax(board, depth - 1, alpha, beta, next, aiPlayer));
+    undoMoveInPlace(board, undo);
     beta = Math.min(beta, value);
     if (alpha >= beta) break;
   }
@@ -106,8 +145,9 @@ export function getBestMove(board: Board, aiPlayer: Player, difficulty: Difficul
   let bestScore = -Infinity;
 
   for (const move of moves) {
-    const child = applyMove(board, move);
-    const score = minimax(child, depth - 1, -Infinity, Infinity, opponent(aiPlayer), aiPlayer);
+    const undo = makeMoveInPlace(board, move);
+    const score = minimax(board, depth - 1, -Infinity, Infinity, opponent(aiPlayer), aiPlayer);
+    undoMoveInPlace(board, undo);
 
     if (score > bestScore) {
       bestScore = score;

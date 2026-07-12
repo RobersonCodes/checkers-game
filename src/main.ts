@@ -1,9 +1,10 @@
 import "../style.css";
-import type { Difficulty } from "./types";
+import type { Difficulty, Move } from "./types";
 import { countPieces } from "./rules";
 import { renderBoard, resetBoardView } from "./render";
 import { Game } from "./game";
 import { isMuted, playCapture, playInvalid, playKing, playMove, playWin, setMuted, vibrate } from "./sound";
+import type { AiRequest, AiResponse } from "./ai.worker";
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   easy: "Fácil",
@@ -19,7 +20,35 @@ const LEVEL_TO_DIFFICULTY: Record<string, Difficulty> = {
 
 const DIFFICULTY_CYCLE: Difficulty[] = ["easy", "medium", "hard"];
 
+// Minimum wall-clock time an AI turn takes before its move is applied — keeps
+// the "thinking" beat even when the worker resolves almost instantly (e.g.
+// easy difficulty on a near-empty board), without ever blocking the UI thread.
 const AI_THINK_DELAY_MS = 550;
+
+/**
+ * AI search runs in a dedicated worker so "difícil" (depth 6) can never
+ * freeze rendering or input on the main thread. Requests are tagged with an
+ * incrementing id; a response whose id doesn't match the currently pending
+ * request is a stale reply from a game that was reset/toggled/loaded away
+ * in the meantime, and is discarded instead of being applied.
+ */
+const aiWorker = new Worker(new URL("./ai.worker.ts", import.meta.url), { type: "module" });
+
+interface PendingAiRequest {
+  id: number;
+  startedAt: number;
+  paceTimer: ReturnType<typeof window.setTimeout> | null;
+}
+
+let nextAiRequestId = 0;
+let pendingAiRequest: PendingAiRequest | null = null;
+
+function cancelPendingAiRequest(): void {
+  if (pendingAiRequest && pendingAiRequest.paceTimer !== null) {
+    window.clearTimeout(pendingAiRequest.paceTimer);
+  }
+  pendingAiRequest = null;
+}
 
 function el<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -121,16 +150,40 @@ function render(): void {
   }
 }
 
-function scheduleAiMoveIfNeeded(): void {
+function applyAiMove(request: PendingAiRequest, move: Move | null): void {
+  if (pendingAiRequest !== request) return; // superseded by a reset/toggle/load in the meantime
+  pendingAiRequest = null;
+  game.makeAiMove(move);
+  reactToMoveEvents();
+  render();
+  requestAiMoveIfNeeded();
+}
+
+function requestAiMoveIfNeeded(): void {
   if (!game.isAiTurn()) return;
   render();
-  window.setTimeout(() => {
-    game.makeAiMove();
-    reactToMoveEvents();
-    render();
-    scheduleAiMoveIfNeeded();
-  }, AI_THINK_DELAY_MS);
+
+  const request: PendingAiRequest = { id: ++nextAiRequestId, startedAt: performance.now(), paceTimer: null };
+  pendingAiRequest = request;
+
+  const message: AiRequest = {
+    requestId: request.id,
+    board: game.board,
+    aiColor: game.aiColor,
+    difficulty: game.difficulty,
+  };
+  aiWorker.postMessage(message);
 }
+
+aiWorker.addEventListener("message", (event: MessageEvent) => {
+  const { requestId, move } = event.data as AiResponse;
+  if (!pendingAiRequest || pendingAiRequest.id !== requestId) return;
+
+  const request = pendingAiRequest;
+  const elapsed = performance.now() - request.startedAt;
+  const remaining = Math.max(0, AI_THINK_DELAY_MS - elapsed);
+  request.paceTimer = window.setTimeout(() => applyAiMove(request, move), remaining);
+});
 
 function handleSquareClick(row: number, col: number): void {
   if (game.isAiTurn()) return;
@@ -141,7 +194,7 @@ function handleSquareClick(row: number, col: number): void {
   }
   reactToMoveEvents();
   render();
-  scheduleAiMoveIfNeeded();
+  requestAiMoveIfNeeded();
 }
 
 function hideStartScreen(): void {
@@ -149,13 +202,14 @@ function hideStartScreen(): void {
 }
 
 function startNewGame(): void {
+  cancelPendingAiRequest();
   modalDismissedForThisGame = false;
   winSoundPlayedForThisGame = false;
   flashMessage = null;
   resetBoardView();
   hideStartScreen();
   render();
-  scheduleAiMoveIfNeeded();
+  requestAiMoveIfNeeded();
 }
 
 document.querySelectorAll<HTMLButtonElement>(".difficulty-buttons button[data-level]").forEach(button => {
@@ -179,18 +233,20 @@ el<HTMLButtonElement>("renameBtn").addEventListener("click", () => {
 });
 
 el<HTMLButtonElement>("toggleAIBtn").addEventListener("click", () => {
+  cancelPendingAiRequest();
   game.toggleAI();
   render();
-  scheduleAiMoveIfNeeded();
+  requestAiMoveIfNeeded();
 });
 
 el<HTMLButtonElement>("restartBtn").addEventListener("click", () => {
+  cancelPendingAiRequest();
   game.restart();
   modalDismissedForThisGame = false;
   winSoundPlayedForThisGame = false;
   resetBoardView();
   render();
-  scheduleAiMoveIfNeeded();
+  requestAiMoveIfNeeded();
 });
 
 el<HTMLButtonElement>("saveBtn").addEventListener("click", () => {
@@ -200,6 +256,7 @@ el<HTMLButtonElement>("saveBtn").addEventListener("click", () => {
 });
 
 el<HTMLButtonElement>("loadBtn").addEventListener("click", () => {
+  cancelPendingAiRequest();
   const loaded = game.load();
   flashMessage = loaded ? "Partida carregada." : "Nenhuma partida salva encontrada.";
   modalDismissedForThisGame = !game.gameOver;
@@ -207,7 +264,7 @@ el<HTMLButtonElement>("loadBtn").addEventListener("click", () => {
   resetBoardView();
   hideStartScreen();
   render();
-  scheduleAiMoveIfNeeded();
+  requestAiMoveIfNeeded();
 });
 
 el<HTMLButtonElement>("changeDifficultyBtn").addEventListener("click", () => {

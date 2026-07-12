@@ -1,7 +1,6 @@
 import type { Board, Difficulty, Move, Piece, Player } from "./types";
 import { applyMove, createInitialBoard } from "./board";
 import { countPieces, getAllValidMoves, getValidMovesForSquare, hasAnyMoves, opponent } from "./rules";
-import { getBestMove } from "./ai";
 
 const SAVE_KEY = "checkers-save-v1";
 const SCORE_KEY = "checkers-score-v1";
@@ -252,9 +251,9 @@ export class Game {
     this.currentPlayer = next;
   }
 
-  makeAiMove(): boolean {
+  /** Applies a move the caller already computed for the AI (see main.ts's worker-backed search). */
+  makeAiMove(move: Move | null): boolean {
     if (!this.isAiTurn()) return false;
-    const move = getBestMove(this.board, this.aiColor, this.difficulty);
     if (!move) return false;
     this.executeMove(move);
     return true;
